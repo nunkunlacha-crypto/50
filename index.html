@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบตรวจสอบหนังสือรับรอง 50 ทวิ</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        body { font-family: 'Tahoma', sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: auto; padding: 30px; background: white; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); border-top: 10px solid #880e4f; }
+        h1 { color: #880e4f; text-align: center; font-size: 24px; border-bottom: 2px solid #eee; padding-bottom: 20px; }
+        
+        /* กล่องค้นหา */
+        .search-area { display: flex; gap: 10px; margin: 25px 0; background: #fce4ec; padding: 25px; border-radius: 10px; }
+        input[type="text"] { flex: 1; padding: 15px; border: 2px solid #ddd; border-radius: 8px; font-size: 18px; outline: none; }
+        button { padding: 15px 30px; background: #880e4f; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 18px; }
+        button:hover { background: #5d0737; }
+
+        /* สถานะ */
+        #status { text-align: center; font-weight: bold; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .loading { background: #fff3e0; color: #ef6c00; }
+        .ready { background: #e8f5e9; color: #2e7d32; }
+        .error { background: #ffebee; color: #c62828; }
+
+        /* ตารางแสดงผล */
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 15px; text-align: left; }
+        th { background: #fce4ec; color: #880e4f; width: 40%; }
+        .highlight { color: #880e4f; font-weight: bold; font-size: 1.2em; }
+
+        .btn-print { background-color: #2e7d32; width: 100%; margin-top: 25px; padding: 18px; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
+
+        @media print {
+            .search-area, button, #status, h1 { display: none !important; }
+            .container { box-shadow: none; border: 1px solid #000; width: 100%; }
+        }
+    </style>
+</head>
+<body onload="fetchSheetData()">
+
+    <div class="container">
+        <h1>ระบบตรวจสอบหนังสือรับรอง 50 ทวิ</h1>
+        
+        <div id="status" class="loading">⏳ กำลังเชื่อมต่อฐานข้อมูล (โปรดรอสักครู่)...</div>
+
+        <div class="search-area">
+            <input type="text" id="taxIdInput" placeholder="กรอกเลขผู้เสียภาษี 13 หลัก" maxlength="13">
+            <button onclick="doSearch()">ค้นหา</button>
+        </div>
+
+        <div id="resultArea"></div>
+    </div>
+
+    <script>
+        // ลิงก์จาก Google Sheets ของคุณ (ต้อง Publish as CSV แล้ว)
+        const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/1rpXCyMHEyLmkyZsx1JjMB81kMFeBeNBtcwfhpeiMUpE/export?format=csv&gid=0';
+        
+        let database = [];
+
+        async function fetchSheetData() {
+            const statusDiv = document.getElementById('status');
+            try {
+                // ป้องกันการจำค่าเก่าด้วยการใส่เวลาปัจจุบันต่อท้ายลิงก์
+                const response = await fetch(SHEET_CSV_URL + '&update=' + new Date().getTime());
+                const text = await response.text();
+                const workbook = XLSX.read(text, { type: 'string' });
+                const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+
+                // หัวตารางอยู่ที่แถวที่ 5 (Index 4)
+                const headers = rows[4]; 
+                const dataRows = rows.slice(5);
+
+                database = dataRows.map(row => {
+                    let obj = {};
+                    headers.forEach((h, i) => { if(h) obj[h.trim()] = row[i]; });
+                    return obj;
+                });
+
+                statusDiv.className = 'ready';
+                statusDiv.innerHTML = '✅ ข้อมูลเชื่อมต่อสำเร็จ พร้อมใช้งาน';
+            } catch (err) {
+                statusDiv.className = 'error';
+                statusDiv.innerHTML = '❌ เชื่อมต่อข้อมูลไม่ได้ (โปรดเช็กการ Publish to Web ใน Google Sheets)';
+            }
+        }
+
+        function doSearch() {
+            const input = document.getElementById('taxIdInput').value.replace(/[^0-9]/g, '');
+            const output = document.getElementById('resultArea');
+            
+            if (input.length !== 13) {
+                alert("กรุณากรอกเลขให้ครบ 13 หลัก");
+                return;
+            }
+
+            const found = database.find(item => 
+                String(item['เลขประจำตัวผู้เสียภาษีอากร'] || '').replace(/[^0-9]/g, '') === input
+            );
+
+            if (found) {
+                // ดึงข้อมูลคอลัมน์ P (ประเภทภาษีเงินได้)
+                let taxType = found['ประเภทภาษีเงินได้'] || '-';
+                
+                output.innerHTML = `
+                    <table>
+                        <tr><th>ชื่อ - นามสกุล</th><td>${found['ชื่อ - นามสกุล'] || '-'}</td></tr>
+                        <tr><th>เลขผู้เสียภาษี</th><td>${found['เลขประจำตัวผู้เสียภาษีอากร'] || '-'}</td></tr>
+                        <tr><th>ที่อยู่</th><td>${found['ที่อยู่'] || '-'}</td></tr>
+                        <tr><th>ประเภทภาษีเงินได้</th><td class="highlight">${taxType}</td></tr>
+                        <tr><th>จำนวนเงินที่จ่าย</th><td>${formatCurr(found['จำนวนเงินที่จ่าย'])} บาท</td></tr>
+                        <tr><th>ภาษีหักและนำส่งไว้</th><td>${formatCurr(found['ภาษี่หักและนำส่งไว้'] || found['ภาษีหักและนำส่งไว้'])} บาท</td></tr>
+                        <tr><th>ปีภาษี</th><td>${found['ปีภาษีที่จ่ายเงินได้'] || '-'}</td></tr>
+                    </table>
+                    <button class="btn-print" onclick="window.print()">พิมพ์เอกสาร หรือ Save PDF</button>
+                `;
+            } else {
+                output.innerHTML = '<div style="color:red; text-align:center; font-weight:bold; margin-top:20px;">❌ ไม่พบข้อมูลเลขนี้ในระบบ</div>';
+            }
+        }
+
+        function formatCurr(val) {
+            let n = parseFloat(String(val).replace(/,/g, ''));
+            return isNaN(n) ? '0.00' : n.toLocaleString('th-TH', {minimumFractionDigits: 2});
+        }
+    </script>
+</body>
+</html>
